@@ -1,0 +1,36 @@
+{
+  "name": "slite-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Slite integration - search and retrieve notes from your Slite workspace",
+  "main": "build/index.js",
+  "bin": {
+    "slite-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "npx tsc",
+    "start": "node build/index.js",
+    "test": "node tests/test-slite-api.js"
+  },
+  "keywords": [
+    "mcp",
+    "slite",
+    "model-context-protocol",
+    "ai",
+    "notes",
+    "knowledge-base"
+  ],
+  "author": "Fajar Firdaus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fajarmf/slite-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

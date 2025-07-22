@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "slite": {
+      "command": "node",
+      "args": ["/absolute/path/to/slite-mcp/build/index.js"],
+      "env": {
+        "SLITE_API_KEY": "your-slite-api-key-here"
+      }
+    }
+  }
+}
