@@ -117,6 +117,89 @@ class SliteServer {
               required: ["question"],
             },
           },
+          {
+            name: "slite_edit_note",
+            description:
+              "Edit a Slite note using search-and-replace. Preferred for targeted edits - faster and safer than full rewrite. Each edit's oldText must be unique in the document.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                noteId: {
+                  type: "string",
+                  description: "The ID of the note to edit",
+                },
+                edits: {
+                  type: "array",
+                  description: "List of search-and-replace operations applied sequentially",
+                  items: {
+                    type: "object",
+                    properties: {
+                      oldText: {
+                        type: "string",
+                        description: "Exact text to find (must be unique in document)",
+                      },
+                      newText: {
+                        type: "string",
+                        description: "Text to replace it with",
+                      },
+                    },
+                    required: ["oldText", "newText"],
+                  },
+                },
+                dryRun: {
+                  type: "boolean",
+                  description: "If true, validate edits without applying them",
+                  default: false,
+                },
+              },
+              required: ["noteId", "edits"],
+            },
+          },
+          {
+            name: "slite_update_note",
+            description:
+              "Replace entire note content. Use slite_edit_note for small changes. WARNING: This overwrites everything.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                noteId: {
+                  type: "string",
+                  description: "The ID of the note to update",
+                },
+                title: {
+                  type: "string",
+                  description: "New title (optional - keeps existing if not provided)",
+                },
+                markdown: {
+                  type: "string",
+                  description: "New markdown content (replaces entire note)",
+                },
+              },
+              required: ["noteId", "markdown"],
+            },
+          },
+          {
+            name: "slite_create_note",
+            description: "Create a new note in Slite",
+            inputSchema: {
+              type: "object",
+              properties: {
+                title: {
+                  type: "string",
+                  description: "Note title",
+                },
+                markdown: {
+                  type: "string",
+                  description: "Note content in markdown format",
+                },
+                parentNoteId: {
+                  type: "string",
+                  description: "Parent note ID (optional - creates in personal channel if not specified)",
+                },
+              },
+              required: ["title"],
+            },
+          },
         ],
       };
     });
@@ -138,6 +221,27 @@ class SliteServer {
           case "slite_ask":
             return await this.askSlite(args?.question as string, args?.parentNoteId as string | undefined);
 
+          case "slite_edit_note":
+            return await this.editNote(
+              args?.noteId as string,
+              args?.edits as Array<{ oldText: string; newText: string }>,
+              (args?.dryRun as boolean) || false
+            );
+
+          case "slite_update_note":
+            return await this.updateNote(
+              args?.noteId as string,
+              args?.markdown as string,
+              args?.title as string | undefined
+            );
+
+          case "slite_create_note":
+            return await this.createNote(
+              args?.title as string,
+              args?.markdown as string | undefined,
+              args?.parentNoteId as string | undefined
+            );
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -154,21 +258,31 @@ class SliteServer {
     });
   }
 
-  private async makeSliteRequest(endpoint: string, params?: any) {
-    const response = await axios.get(`${SLITE_API_BASE}${endpoint}`, {
+  private async makeSliteRequest(
+    endpoint: string,
+    options?: {
+      method?: "GET" | "PUT" | "POST";
+      params?: any;
+      data?: any;
+    }
+  ) {
+    const { method = "GET", params, data } = options || {};
+    const response = await axios({
+      method,
+      url: `${SLITE_API_BASE}${endpoint}`,
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
       },
       params,
+      data,
     });
     return response.data;
   }
 
   private async searchNotes(query: string, hitsPerPage: number) {
     const data = await this.makeSliteRequest("/search-notes", {
-      query,
-      hitsPerPage,
+      params: { query, hitsPerPage },
     });
 
     const results = data.hits?.map((hit: any) => ({
@@ -194,7 +308,7 @@ class SliteServer {
 
   private async getNote(noteId: string, format: string) {
     const data = await this.makeSliteRequest(`/notes/${noteId}`, {
-      format,
+      params: { format },
     });
 
     return {
@@ -212,7 +326,7 @@ class SliteServer {
     if (cursor) {
       params.cursor = cursor;
     }
-    const data = await this.makeSliteRequest(`/notes/${noteId}/children`, params);
+    const data = await this.makeSliteRequest(`/notes/${noteId}/children`, { params });
 
     const children = data.notes || [];
 
@@ -245,7 +359,7 @@ class SliteServer {
       params.parentNoteId = parentNoteId;
     }
 
-    const data = await this.makeSliteRequest("/ask", params);
+    const data = await this.makeSliteRequest("/ask", { params });
 
     const sources = data.sources || [];
     const sourcesList = sources.length > 0
@@ -257,6 +371,113 @@ class SliteServer {
         {
           type: "text",
           text: `${data.answer || "No answer available."}${sourcesList}`,
+        },
+      ],
+    };
+  }
+
+  private async editNote(
+    noteId: string,
+    edits: Array<{ oldText: string; newText: string }>,
+    dryRun: boolean = false
+  ) {
+    // 1. Fetch current content
+    const note = await this.makeSliteRequest(`/notes/${noteId}`, {
+      params: { format: "md" },
+    });
+    let content = note.content;
+
+    // 2. Apply edits with validation
+    const results: string[] = [];
+    for (let i = 0; i < edits.length; i++) {
+      const { oldText, newText } = edits[i];
+      const occurrences = content.split(oldText).length - 1;
+
+      if (occurrences === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: Edit #${i + 1} failed - text not found: "${oldText.substring(0, 50)}${oldText.length > 50 ? "..." : ""}"`,
+            },
+          ],
+        };
+      }
+      if (occurrences > 1) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: Edit #${i + 1} failed - text found ${occurrences} times. Provide more context to make it unique.`,
+            },
+          ],
+        };
+      }
+
+      content = content.replace(oldText, newText);
+      results.push(
+        `Edit #${i + 1}: Replaced "${oldText.substring(0, 30)}${oldText.length > 30 ? "..." : ""}" with "${newText.substring(0, 30)}${newText.length > 30 ? "..." : ""}"`
+      );
+    }
+
+    // 3. Apply changes (unless dry run)
+    if (!dryRun) {
+      await this.makeSliteRequest(`/notes/${noteId}`, {
+        method: "PUT",
+        data: { markdown: content },
+      });
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: dryRun
+            ? `Dry run successful - ${edits.length} edit(s) would be applied:\n${results.join("\n")}`
+            : `Successfully applied ${edits.length} edit(s) to note ${noteId}:\n${results.join("\n")}`,
+        },
+      ],
+    };
+  }
+
+  private async updateNote(noteId: string, markdown: string, title?: string) {
+    const data: any = { markdown };
+    if (title) data.title = title;
+
+    await this.makeSliteRequest(`/notes/${noteId}`, {
+      method: "PUT",
+      data,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Successfully updated note ${noteId}${title ? ` with new title "${title}"` : ""}`,
+        },
+      ],
+    };
+  }
+
+  private async createNote(
+    title: string,
+    markdown?: string,
+    parentNoteId?: string
+  ) {
+    const data: any = { title };
+    if (markdown) data.markdown = markdown;
+    if (parentNoteId) data.parentNoteId = parentNoteId;
+
+    const result = await this.makeSliteRequest("/notes", {
+      method: "POST",
+      data,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Created note "${result.title}" (ID: ${result.id})`,
         },
       ],
     };

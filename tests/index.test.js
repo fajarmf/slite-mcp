@@ -309,10 +309,16 @@ describe('MCP Server', () => {
     const tools = response.result?.tools || [];
     const toolNames = tools.map(t => t.name);
 
+    // Read tools
     assert.ok(toolNames.includes('slite_search'), 'should have slite_search');
     assert.ok(toolNames.includes('slite_get_note'), 'should have slite_get_note');
     assert.ok(toolNames.includes('slite_get_note_children'), 'should have slite_get_note_children');
     assert.ok(toolNames.includes('slite_ask'), 'should have slite_ask');
+
+    // Write tools
+    assert.ok(toolNames.includes('slite_create_note'), 'should have slite_create_note');
+    assert.ok(toolNames.includes('slite_edit_note'), 'should have slite_edit_note');
+    assert.ok(toolNames.includes('slite_update_note'), 'should have slite_update_note');
   });
 
   it('should execute slite_search tool', async () => {
@@ -373,5 +379,167 @@ describe('MCP Server', () => {
 
     const content = response.result?.content?.[0]?.text || '';
     assert.ok(content.includes('Error') || response.error, 'should return error');
+  });
+
+  // Write operation tests
+  let createdNoteId;
+  const ORIGINAL_MARKER = 'EDIT_TEST_MARKER_XYZ';
+  const EDITED_MARKER = 'EDITED_MARKER_ABC';
+
+  it('should create a note and verify its content', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+
+    const timestamp = Date.now();
+    const expectedTitle = `MCP Test Note ${timestamp}`;
+    const expectedContent = `# Test Content\n\nThis is a test note created by the MCP server test suite.\n\nUnique marker: ${ORIGINAL_MARKER}`;
+
+    // Create the note
+    const createResponse = await sendRequest('tools/call', {
+      name: 'slite_create_note',
+      arguments: {
+        title: expectedTitle,
+        markdown: expectedContent,
+        parentNoteId: TEST_NOTE_ID
+      }
+    });
+
+    const createResult = createResponse.result?.content?.[0]?.text || '';
+    assert.ok(createResult.includes('Created note'), 'should confirm note creation');
+
+    // Extract note ID from response
+    const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
+    assert.ok(idMatch, 'should return note ID');
+    createdNoteId = idMatch[1];
+
+    // Fetch the note and verify content
+    const getResponse = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: createdNoteId, format: 'md' }
+    });
+
+    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    assert.ok(noteContent.includes(expectedTitle), 'fetched note should have correct title');
+    assert.ok(noteContent.includes(ORIGINAL_MARKER), 'fetched note should contain the original marker');
+  });
+
+  it('should not modify content with dry run', async () => {
+    if (!createdNoteId) {
+      console.log('    Skipping: No created note to edit');
+      return;
+    }
+
+    // Perform dry run edit
+    const dryRunResponse = await sendRequest('tools/call', {
+      name: 'slite_edit_note',
+      arguments: {
+        noteId: createdNoteId,
+        edits: [
+          { oldText: ORIGINAL_MARKER, newText: EDITED_MARKER }
+        ],
+        dryRun: true
+      }
+    });
+
+    const dryRunResult = dryRunResponse.result?.content?.[0]?.text || '';
+    assert.ok(dryRunResult.includes('Dry run successful'), 'should confirm dry run');
+
+    // Verify content was NOT changed
+    const getResponse = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: createdNoteId, format: 'md' }
+    });
+
+    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    assert.ok(noteContent.includes(ORIGINAL_MARKER), 'content should still have ORIGINAL marker after dry run');
+    assert.ok(!noteContent.includes(EDITED_MARKER), 'content should NOT have EDITED marker after dry run');
+  });
+
+  it('should edit note content and verify the change', async () => {
+    if (!createdNoteId) {
+      console.log('    Skipping: No created note to edit');
+      return;
+    }
+
+    // Perform actual edit
+    const editResponse = await sendRequest('tools/call', {
+      name: 'slite_edit_note',
+      arguments: {
+        noteId: createdNoteId,
+        edits: [
+          { oldText: ORIGINAL_MARKER, newText: EDITED_MARKER }
+        ]
+      }
+    });
+
+    const editResult = editResponse.result?.content?.[0]?.text || '';
+    assert.ok(editResult.includes('Successfully applied'), 'should confirm edit');
+
+    // Verify content WAS changed
+    const getResponse = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: createdNoteId, format: 'md' }
+    });
+
+    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    assert.ok(noteContent.includes(EDITED_MARKER), 'content should have EDITED marker after edit');
+    assert.ok(!noteContent.includes(ORIGINAL_MARKER), 'content should NOT have ORIGINAL marker after edit');
+  });
+
+  it('should handle edit error for text not found', async () => {
+    if (!createdNoteId) {
+      console.log('    Skipping: No created note to edit');
+      return;
+    }
+
+    const response = await sendRequest('tools/call', {
+      name: 'slite_edit_note',
+      arguments: {
+        noteId: createdNoteId,
+        edits: [
+          { oldText: 'THIS_TEXT_DOES_NOT_EXIST_IN_NOTE', newText: 'replacement' }
+        ]
+      }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.includes('text not found'), 'should report text not found');
+  });
+
+  it('should update note content completely and verify the change', async () => {
+    if (!createdNoteId) {
+      console.log('    Skipping: No created note to update');
+      return;
+    }
+
+    const newTitle = 'MCP Test Note (Updated)';
+    const newContent = '# Updated Content\n\nThis note was fully updated by the MCP server test suite.\n\nFinal marker: UPDATE_COMPLETE_789';
+
+    // Perform full update
+    const updateResponse = await sendRequest('tools/call', {
+      name: 'slite_update_note',
+      arguments: {
+        noteId: createdNoteId,
+        markdown: newContent,
+        title: newTitle
+      }
+    });
+
+    const updateResult = updateResponse.result?.content?.[0]?.text || '';
+    assert.ok(updateResult.includes('Successfully updated'), 'should confirm update');
+
+    // Verify content was completely replaced
+    const getResponse = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: createdNoteId, format: 'md' }
+    });
+
+    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    assert.ok(noteContent.includes(newTitle), 'should have new title');
+    assert.ok(noteContent.includes('UPDATE_COMPLETE_789'), 'should have new content marker');
+    assert.ok(!noteContent.includes(EDITED_MARKER), 'should NOT have old edited marker');
+    assert.ok(noteContent.includes('fully updated'), 'should contain new content text');
   });
 });
