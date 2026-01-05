@@ -33,7 +33,7 @@ async function testSliteConnection(apiKey, keyName) {
       },
       params: {
         query: process.argv[2] || 'test',
-        limit: 5
+        hitsPerPage: 5
       }
     });
     
@@ -42,22 +42,22 @@ async function testSliteConnection(apiKey, keyName) {
     console.log(JSON.stringify(searchResponse.headers, null, 2));
     console.log('\nResponse Body:');
     console.log(JSON.stringify(searchResponse.data, null, 2));
-    console.log(`\nFound ${searchResponse.data.notes?.length || 0} notes`);
+    console.log(`\nFound ${searchResponse.data.hits?.length || 0} notes`);
 
     // Test 2: Get a specific note (if we found any)
-    if (searchResponse.data.notes && searchResponse.data.notes.length > 0) {
-      const firstNoteId = searchResponse.data.notes[0].id;
+    if (searchResponse.data.hits && searchResponse.data.hits.length > 0) {
+      const firstNoteId = searchResponse.data.hits[0].id;
       console.log(`\n2. Testing get note endpoint...`);
       console.log(`   URL: ${SLITE_API_BASE}/notes/${firstNoteId}`);
-      console.log(`   Format: markdown`);
-      
+      console.log(`   Format: md`);
+
       const noteResponse = await axios.get(`${SLITE_API_BASE}/notes/${firstNoteId}`, {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
         params: {
-          format: 'markdown'
+          format: 'md'
         }
       });
       
@@ -77,9 +77,7 @@ async function testSliteConnection(apiKey, keyName) {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
-        params: {
-          limit: 10
-        }
+        params: {}
       });
       
       console.log('\n✓ Get children successful!');

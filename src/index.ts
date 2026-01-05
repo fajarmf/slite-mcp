@@ -19,10 +19,17 @@ class SliteServer {
   private config: SliteConfig;
 
   constructor() {
-    this.server = new Server({
-      name: "slite-mcp",
-      version: "1.0.0",
-    });
+    this.server = new Server(
+      {
+        name: "slite-mcp",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
 
     this.config = {
       apiKey: process.env.SLITE_API_KEY || "",
@@ -45,9 +52,9 @@ class SliteServer {
                   type: "string",
                   description: "Search query",
                 },
-                limit: {
+                hitsPerPage: {
                   type: "number",
-                  description: "Maximum number of results (default: 10)",
+                  description: "Maximum number of results per page (default: 10)",
                   default: 10,
                 },
               },
@@ -84,13 +91,30 @@ class SliteServer {
                   type: "string",
                   description: "The ID of the parent note",
                 },
-                limit: {
-                  type: "number",
-                  description: "Maximum number of results (default: 20)",
-                  default: 20,
+                cursor: {
+                  type: "string",
+                  description: "Cursor for pagination (from previous response)",
                 },
               },
               required: ["noteId"],
+            },
+          },
+          {
+            name: "slite_ask",
+            description: "Ask a question to your Slite notes in natural language. Returns an AI-generated answer with sources.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                question: {
+                  type: "string",
+                  description: "The question to ask Slite",
+                },
+                parentNoteId: {
+                  type: "string",
+                  description: "Optional filter to only search within notes under this parent note ID",
+                },
+              },
+              required: ["question"],
             },
           },
         ],
@@ -103,14 +127,17 @@ class SliteServer {
       try {
         switch (name) {
           case "slite_search":
-            return await this.searchNotes(args?.query as string, (args?.limit as number) || 10);
-          
+            return await this.searchNotes(args?.query as string, (args?.hitsPerPage as number) || 10);
+
           case "slite_get_note":
             return await this.getNote(args?.noteId as string, (args?.format as string) || "md");
-          
+
           case "slite_get_note_children":
-            return await this.getNoteChildren(args?.noteId as string, (args?.limit as number) || 20);
-          
+            return await this.getNoteChildren(args?.noteId as string, args?.cursor as string | undefined);
+
+          case "slite_ask":
+            return await this.askSlite(args?.question as string, args?.parentNoteId as string | undefined);
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -138,10 +165,10 @@ class SliteServer {
     return response.data;
   }
 
-  private async searchNotes(query: string, limit: number) {
+  private async searchNotes(query: string, hitsPerPage: number) {
     const data = await this.makeSliteRequest("/search-notes", {
       query,
-      limit,
+      hitsPerPage,
     });
 
     const results = data.hits?.map((hit: any) => ({
@@ -180,13 +207,15 @@ class SliteServer {
     };
   }
 
-  private async getNoteChildren(noteId: string, limit: number) {
-    const data = await this.makeSliteRequest(`/notes/${noteId}/children`, {
-      limit,
-    });
+  private async getNoteChildren(noteId: string, cursor?: string) {
+    const params: any = {};
+    if (cursor) {
+      params.cursor = cursor;
+    }
+    const data = await this.makeSliteRequest(`/notes/${noteId}/children`, params);
 
     const children = data.notes || [];
-    
+
     if (children.length === 0) {
       return {
         content: [
@@ -205,6 +234,29 @@ class SliteServer {
           text: `Found ${children.length} child notes (Total: ${data.total}):\n\n${children
             .map((note: any) => `**${note.title}** (ID: ${note.id})\n${note.content?.substring(0, 200) || 'No content preview'}${note.content?.length > 200 ? '...' : ''}\n---`)
             .join("\n")}`,
+        },
+      ],
+    };
+  }
+
+  private async askSlite(question: string, parentNoteId?: string) {
+    const params: any = { question };
+    if (parentNoteId) {
+      params.parentNoteId = parentNoteId;
+    }
+
+    const data = await this.makeSliteRequest("/ask", params);
+
+    const sources = data.sources || [];
+    const sourcesList = sources.length > 0
+      ? `\n\n**Sources:**\n${sources.map((s: any) => `- [${s.title || 'Untitled'}](${s.url})`).join("\n")}`
+      : "";
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${data.answer || "No answer available."}${sourcesList}`,
         },
       ],
     };

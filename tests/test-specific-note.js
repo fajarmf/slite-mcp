@@ -48,7 +48,6 @@ async function testSpecificNote() {
         'Content-Type': 'application/json'
       },
       params: {
-        limit: 10
       }
     });
     
