@@ -7,6 +7,7 @@ A Model Context Protocol (MCP) server that integrates with Slite's API to search
 - 🔍 **Search Notes**: Search through your Slite workspace
 - 📄 **Get Note Content**: Retrieve specific notes by ID in markdown or HTML format
 - 🌳 **Browse Hierarchy**: Get child notes of any parent note
+- 🤖 **Ask Questions**: Natural language question answering across your workspace
 
 ## Installation
 
@@ -57,7 +58,7 @@ Search for notes in your Slite workspace.
 
 **Parameters:**
 - `query` (required): Search query string
-- `limit` (optional): Maximum number of results (default: 10)
+- `hitsPerPage` (optional): Results per page (default: 10)
 
 **Example:**
 ```json
@@ -65,7 +66,7 @@ Search for notes in your Slite workspace.
   "tool": "slite_search",
   "arguments": {
     "query": "project documentation",
-    "limit": 5
+    "hitsPerPage": 5
   }
 }
 ```
@@ -93,33 +94,78 @@ Get all child notes of a parent note.
 
 **Parameters:**
 - `noteId` (required): The ID of the parent note
-- `limit` (optional): Maximum number of results (default: 20)
+- `cursor` (optional): Pagination cursor for next page
 
 **Example:**
 ```json
 {
   "tool": "slite_get_note_children",
   "arguments": {
-    "noteId": "5i6k33yrVu7eMy",
-    "limit": 10
+    "noteId": "5i6k33yrVu7eMy"
+  }
+}
+```
+
+### slite_ask
+Ask natural language questions and get AI-powered answers from your Slite workspace.
+
+**Parameters:**
+- `question` (required): The question to ask
+- `parentNoteId` (optional): Limit search to notes under this parent
+
+**Example:**
+```json
+{
+  "tool": "slite_ask",
+  "arguments": {
+    "question": "What is our deployment process?"
   }
 }
 ```
 
 ## Testing
 
-Run the test scripts to verify your API connection:
+### Quick Start
 
 ```bash
-# Test API connection with default search
-node tests/test-slite-api.js
+# Copy environment config and add your API key
+cp .env.example .env
+# Edit .env with your SLITE_API_KEY
 
-# Test with custom search query
-node tests/test-slite-api.js "your search term"
+# Setup test data (creates test documents in Slite)
+npm run test:setup
 
-# Test specific note retrieval
-node tests/test-specific-note.js [noteId]
+# Run all tests
+npm test
 ```
+
+### Test Setup
+
+The `test:setup` command creates test documents in your Slite workspace:
+- A parent note with 55 child notes (for cursor pagination testing)
+- A "Test Data for MCP Server" child with searchable keywords
+
+The script is idempotent - it won't create duplicates if test data already exists.
+
+```bash
+# Setup with a new parent note
+npm run test:setup
+
+# Or use an existing note as parent
+npm run test:setup -- --parent=<note-id>
+
+# Force recreation even if data exists
+npm run test:setup -- --force
+```
+
+### Test Suite
+
+The test suite includes:
+- **API Tests**: Search, get note, get children, ask endpoint
+- **Error Handling**: Invalid IDs, unauthorized access
+- **Pagination**: hitsPerPage for search, cursor for children (requires 55+ children)
+- **Content Formats**: Markdown and HTML output
+- **MCP Server Integration**: All tools via stdio transport
 
 ## Development
 
@@ -128,10 +174,12 @@ node tests/test-specific-note.js [noteId]
 ```
 slite-mcp/
 ├── src/
-│   └── index.ts        # Main MCP server implementation
-├── build/              # Compiled JavaScript files
-├── tests/              # Test scripts
-├── examples/           # Example configurations
+│   └── index.ts           # Main MCP server implementation
+├── build/                 # Compiled JavaScript files
+├── tests/
+│   ├── index.test.js      # Consolidated test suite
+│   └── setup-test-data.js # Idempotent test data setup
+├── examples/              # Example configurations
 ├── package.json
 ├── tsconfig.json
 └── README.md

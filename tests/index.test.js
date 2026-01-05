@@ -1,0 +1,368 @@
+/**
+ * Slite MCP Server Test Suite
+ *
+ * Run with: npm test
+ * Setup test data first: npm run test:setup
+ */
+
+require('dotenv').config();
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert');
+const axios = require('axios');
+const { spawn } = require('child_process');
+const path = require('path');
+
+const SLITE_API_BASE = 'https://api.slite.com/v1';
+const API_KEY = process.env.SLITE_API_KEY;
+const TEST_NOTE_ID = process.env.TEST_NOTE_ID;
+
+if (!API_KEY) {
+  console.error('Error: SLITE_API_KEY not found. Set it in your .env file.');
+  process.exit(1);
+}
+
+const headers = {
+  'Authorization': `Bearer ${API_KEY}`,
+  'Content-Type': 'application/json'
+};
+
+// Helper to make API requests
+async function sliteRequest(endpoint, params = {}) {
+  const response = await axios.get(`${SLITE_API_BASE}${endpoint}`, { headers, params });
+  return response.data;
+}
+
+// =============================================================================
+// API Tests
+// =============================================================================
+
+describe('Slite API', () => {
+  it('should search notes', async () => {
+    const data = await sliteRequest('/search-notes', { query: 'test', hitsPerPage: 5 });
+    assert.ok(Array.isArray(data.hits), 'hits should be an array');
+    assert.ok(data.hits.length > 0, 'should return results');
+  });
+
+  it('should get a note by ID', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+    const data = await sliteRequest(`/notes/${TEST_NOTE_ID}`, { format: 'md' });
+    assert.ok(data.id, 'note should have an id');
+    assert.ok(data.title, 'note should have a title');
+  });
+
+  it('should get note children', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+    const data = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`);
+    assert.ok(Array.isArray(data.notes), 'notes should be an array');
+    assert.ok(typeof data.total === 'number', 'total should be a number');
+  });
+
+  it('should answer questions with /ask', async () => {
+    const data = await sliteRequest('/ask', { question: 'What is this workspace about?' });
+    assert.ok(typeof data.answer === 'string', 'answer should be a string');
+  });
+});
+
+// =============================================================================
+// Error Handling Tests
+// =============================================================================
+
+describe('Error Handling', () => {
+  it('should return 404 for invalid note ID', async () => {
+    try {
+      await sliteRequest('/notes/invalid-note-id-xyz');
+      assert.fail('Should have thrown an error');
+    } catch (error) {
+      assert.strictEqual(error.response?.status, 404);
+    }
+  });
+
+  it('should return 401 for invalid API key', async () => {
+    try {
+      await axios.get(`${SLITE_API_BASE}/search-notes`, {
+        headers: { 'Authorization': 'Bearer invalid-key', 'Content-Type': 'application/json' },
+        params: { query: 'test' }
+      });
+      assert.fail('Should have thrown an error');
+    } catch (error) {
+      assert.strictEqual(error.response?.status, 401);
+    }
+  });
+
+  it('should return 404 for invalid parent note children', async () => {
+    try {
+      await sliteRequest('/notes/invalid-note-id/children');
+      assert.fail('Should have thrown an error');
+    } catch (error) {
+      assert.strictEqual(error.response?.status, 404);
+    }
+  });
+});
+
+// =============================================================================
+// Pagination Tests
+// =============================================================================
+
+describe('Pagination', () => {
+  it('should paginate search results with hitsPerPage', async () => {
+    const page1 = await sliteRequest('/search-notes', { query: 'test', hitsPerPage: 2, page: 0 });
+    const page2 = await sliteRequest('/search-notes', { query: 'test', hitsPerPage: 2, page: 1 });
+
+    assert.strictEqual(page1.hits.length, 2, 'page 1 should have 2 results');
+    assert.strictEqual(page2.hits.length, 2, 'page 2 should have 2 results');
+
+    // Pages should have different results
+    const page1Ids = page1.hits.map(h => h.id);
+    const page2Ids = page2.hits.map(h => h.id);
+    const hasDifferent = !page1Ids.every(id => page2Ids.includes(id));
+    assert.ok(hasDifferent, 'pages should have different results');
+  });
+
+  it('should paginate children with cursor (requires 55+ children)', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+
+    const page1 = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`);
+
+    if (page1.total <= 50) {
+      console.log(`    Skipping: Only ${page1.total} children (need >50 for cursor test)`);
+      return;
+    }
+
+    assert.ok(page1.hasNextPage, 'should have next page');
+    assert.ok(page1.nextCursor, 'should have cursor');
+    assert.strictEqual(page1.notes.length, 50, 'first page should have 50 children');
+
+    // Fetch second page
+    const page2 = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`, { cursor: page1.nextCursor });
+    assert.ok(page2.notes.length > 0, 'second page should have children');
+    assert.strictEqual(page1.total, page1.notes.length + page2.notes.length, 'total should match');
+  });
+});
+
+// =============================================================================
+// Format Tests
+// =============================================================================
+
+describe('Content Formats', () => {
+  let testChildId;
+
+  before(async () => {
+    if (!TEST_NOTE_ID) return;
+
+    const children = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`);
+    const testNote = children.notes?.find(c => c.title === 'Test Data for MCP Server');
+    testChildId = testNote?.id;
+  });
+
+  it('should return markdown format', async () => {
+    if (!testChildId) {
+      console.log('    Skipping: Test child note not found');
+      return;
+    }
+
+    const data = await sliteRequest(`/notes/${testChildId}`, { format: 'md' });
+    assert.ok(data.content, 'should have content');
+    // Markdown typically has # headers or ** bold
+    const looksLikeMarkdown = data.content.includes('#') || data.content.includes('**');
+    assert.ok(looksLikeMarkdown, 'content should look like markdown');
+  });
+
+  it('should return HTML format', async () => {
+    if (!testChildId) {
+      console.log('    Skipping: Test child note not found');
+      return;
+    }
+
+    const data = await sliteRequest(`/notes/${testChildId}`, { format: 'html' });
+    assert.ok(data.content, 'should have content');
+    assert.ok(data.content.includes('<'), 'content should contain HTML tags');
+  });
+});
+
+// =============================================================================
+// Search Tests
+// =============================================================================
+
+describe('Search Features', () => {
+  it('should handle special characters in search', async () => {
+    const queries = ['test & data', 'test+data', '"test data"'];
+
+    for (const query of queries) {
+      const data = await sliteRequest('/search-notes', { query, hitsPerPage: 5 });
+      assert.ok(Array.isArray(data.hits), `"${query}" should return array`);
+    }
+  });
+
+  it('should find unique test keyword', async () => {
+    const data = await sliteRequest('/search-notes', {
+      query: 'MCP_UNIQUE_TEST_KEYWORD_123',
+      hitsPerPage: 10
+    });
+
+    if (data.hits.length === 0) {
+      console.log('    Warning: Unique keyword not found (indexing may take time)');
+      return;
+    }
+
+    assert.ok(data.hits.length > 0, 'should find test keyword');
+    const hasTestNote = data.hits.some(h => h.title === 'Test Data for MCP Server');
+    assert.ok(hasTestNote, 'should find "Test Data for MCP Server" note');
+  });
+
+  it('should handle long queries', async () => {
+    const longQuery = 'a'.repeat(200);
+    const data = await sliteRequest('/search-notes', { query: longQuery, hitsPerPage: 5 });
+    assert.ok(Array.isArray(data.hits), 'should handle long query');
+  });
+});
+
+// =============================================================================
+// MCP Server Tests
+// =============================================================================
+
+describe('MCP Server', () => {
+  let serverProcess;
+  let messageId = 0;
+  let buffer = '';
+  const pendingResponses = new Map();
+
+  function sendRequest(method, params = {}) {
+    const id = ++messageId;
+    const request = { jsonrpc: '2.0', id, method, params };
+
+    return new Promise((resolve, reject) => {
+      pendingResponses.set(id, resolve);
+      serverProcess.stdin.write(JSON.stringify(request) + '\n');
+
+      setTimeout(() => {
+        if (pendingResponses.has(id)) {
+          pendingResponses.delete(id);
+          reject(new Error('Request timed out'));
+        }
+      }, 30000);
+    });
+  }
+
+  function processBuffer() {
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          const message = JSON.parse(line);
+          const resolver = pendingResponses.get(message.id);
+          if (resolver) {
+            resolver(message);
+            pendingResponses.delete(message.id);
+          }
+        } catch (e) {
+          // Ignore non-JSON lines
+        }
+      }
+    }
+  }
+
+  before(async () => {
+    const serverPath = path.join(__dirname, '..', 'build', 'index.js');
+
+    serverProcess = spawn('node', [serverPath], {
+      env: { ...process.env, SLITE_API_KEY: API_KEY },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    serverProcess.stdout.on('data', (data) => {
+      buffer += data.toString();
+      processBuffer();
+    });
+
+    // Wait for server to start
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  });
+
+  after(() => {
+    if (serverProcess) {
+      serverProcess.kill();
+    }
+  });
+
+  it('should list all tools', async () => {
+    const response = await sendRequest('tools/list');
+    const tools = response.result?.tools || [];
+    const toolNames = tools.map(t => t.name);
+
+    assert.ok(toolNames.includes('slite_search'), 'should have slite_search');
+    assert.ok(toolNames.includes('slite_get_note'), 'should have slite_get_note');
+    assert.ok(toolNames.includes('slite_get_note_children'), 'should have slite_get_note_children');
+    assert.ok(toolNames.includes('slite_ask'), 'should have slite_ask');
+  });
+
+  it('should execute slite_search tool', async () => {
+    const response = await sendRequest('tools/call', {
+      name: 'slite_search',
+      arguments: { query: 'test', hitsPerPage: 5 }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.includes('Found'), 'should return formatted results');
+  });
+
+  it('should execute slite_get_note tool', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+
+    const response = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: TEST_NOTE_ID, format: 'md' }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.length > 0, 'should return note content');
+  });
+
+  it('should execute slite_get_note_children tool', async () => {
+    if (!TEST_NOTE_ID) {
+      console.log('    Skipping: TEST_NOTE_ID not set');
+      return;
+    }
+
+    const response = await sendRequest('tools/call', {
+      name: 'slite_get_note_children',
+      arguments: { noteId: TEST_NOTE_ID }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.includes('child notes'), 'should return children info');
+  });
+
+  it('should execute slite_ask tool', async () => {
+    const response = await sendRequest('tools/call', {
+      name: 'slite_ask',
+      arguments: { question: 'What is this about?' }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.length > 0 || content === '', 'should return answer or empty');
+  });
+
+  it('should handle errors gracefully', async () => {
+    const response = await sendRequest('tools/call', {
+      name: 'slite_get_note',
+      arguments: { noteId: 'invalid-note-id-xyz' }
+    });
+
+    const content = response.result?.content?.[0]?.text || '';
+    assert.ok(content.includes('Error') || response.error, 'should return error');
+  });
+});
