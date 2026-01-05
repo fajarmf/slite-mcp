@@ -158,9 +158,18 @@ describe('Content Formats', () => {
   before(async () => {
     if (!TEST_NOTE_ID) return;
 
-    const children = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`);
-    const testNote = children.notes?.find(c => c.title === 'Test Data for MCP Server');
-    testChildId = testNote?.id;
+    // Paginate through all children to find the test note
+    let cursor = null;
+    do {
+      const params = cursor ? { cursor } : {};
+      const children = await sliteRequest(`/notes/${TEST_NOTE_ID}/children`, params);
+      const testNote = children.notes?.find(c => c.title === 'Test Data for MCP Server');
+      if (testNote) {
+        testChildId = testNote.id;
+        break;
+      }
+      cursor = children.hasNextPage ? children.nextCursor : null;
+    } while (cursor);
   });
 
   it('should return markdown format', async () => {

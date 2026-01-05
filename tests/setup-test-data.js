@@ -18,6 +18,8 @@
 
 require('dotenv').config();
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 const SLITE_API_BASE = 'https://api.slite.com/v1';
 const API_KEY = process.env.SLITE_API_KEY;
@@ -126,6 +128,30 @@ After running, add TEST_NOTE_ID to your .env file (if not already set).
 `);
 }
 
+function updateEnvFile(noteId) {
+  const envPath = path.join(__dirname, '..', '.env');
+
+  if (!fs.existsSync(envPath)) {
+    // Create .env with the TEST_NOTE_ID
+    fs.writeFileSync(envPath, `TEST_NOTE_ID=${noteId}\n`);
+    return;
+  }
+
+  let content = fs.readFileSync(envPath, 'utf8');
+
+  // Check if TEST_NOTE_ID exists (commented or not)
+  if (/^#?\s*TEST_NOTE_ID=/m.test(content)) {
+    // Replace existing (commented or uncommented)
+    content = content.replace(/^#?\s*TEST_NOTE_ID=.*$/m, `TEST_NOTE_ID=${noteId}`);
+  } else {
+    // Append to end
+    if (!content.endsWith('\n')) content += '\n';
+    content += `TEST_NOTE_ID=${noteId}\n`;
+  }
+
+  fs.writeFileSync(envPath, content);
+}
+
 async function createNote(title, content, parentNoteId = null) {
   const payload = {
     title,
@@ -183,6 +209,21 @@ async function setupTestData(options = {}) {
     try {
       parentNote = await getNote(parentNoteId);
       console.log(`  Found: "${parentNote.title}"`);
+
+      // Check if note is archived
+      if (parentNote.archivedAt) {
+        console.log();
+        console.log('ERROR: Parent note is archived!');
+        console.log(`  Archived at: ${parentNote.archivedAt}`);
+        console.log();
+        console.log('Cannot create child notes under an archived parent.');
+        console.log('Options:');
+        console.log('  1. Unarchive the note in Slite');
+        console.log('  2. Remove TEST_NOTE_ID from .env to create a new parent');
+        console.log('  3. Specify a different parent: npm run test:setup -- --parent=<id>');
+        console.log();
+        process.exit(1);
+      }
 
       // Check existing children
       console.log('  Counting children...');
@@ -322,13 +363,14 @@ This note and its children are used for automated testing.
   // Step 4: Final count and output
   const finalChildren = await getChildren(parentNoteId);
 
+  // Update .env file with TEST_NOTE_ID
+  updateEnvFile(parentNoteId);
+
   console.log('='.repeat(60));
   console.log('Setup Complete!');
   console.log('='.repeat(60));
   console.log();
-  console.log('Add this line to your .env file:');
-  console.log();
-  console.log(`TEST_NOTE_ID=${parentNoteId}`);
+  console.log(`Updated .env with TEST_NOTE_ID=${parentNoteId}`);
   console.log();
   console.log(`Total: 1 parent + ${finalChildren.length} children`);
   console.log(`Parent URL: ${parentNote.url}`);
