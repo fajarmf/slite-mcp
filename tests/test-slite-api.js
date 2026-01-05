@@ -1,12 +1,19 @@
+require('dotenv').config();
 const axios = require('axios');
 
 const SLITE_API_BASE = 'https://api.slite.com/v1';
 
-// API keys from ~/.mcp.json
+// API keys from .env file
 const API_KEYS = [
-  '5L173-xi9vACND0mKslF-4e6bda0601db2b23550fe85378b5758ba14f7cb0a4fe5d207d0be9addb22e993',
-  '5L173-Zy4e7xVvUraWaa-45ea04e3cf3a2dded7e897534b7d5bf8d33e6754565ef61610cf14909edb4da5'
-];
+  process.env.SLITE_API_KEY,
+  process.env.SLITE_API_KEY_2
+].filter(Boolean);
+
+if (API_KEYS.length === 0) {
+  console.error('Error: No API keys found. Please set SLITE_API_KEY in your .env file.');
+  console.error('Copy .env.example to .env and add your API key.');
+  process.exit(1);
+}
 
 async function testSliteConnection(apiKey, keyName) {
   console.log(`\n${'='.repeat(60)}`);
@@ -120,9 +127,9 @@ async function testSliteConnection(apiKey, keyName) {
   }
 }
 
-// Run the tests for both API keys
+// Run the tests for API keys
 async function runTests() {
-  console.log('Testing Slite API keys from ~/.mcp.json...');
+  console.log('Testing Slite API keys from .env file...');
   if (process.argv[2]) {
     console.log(`Using custom search query: "${process.argv[2]}"`);
   }

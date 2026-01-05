@@ -26,11 +26,12 @@
     "url": "https://github.com/fajarmf/slite-mcp.git"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.4.0",
+    "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.6.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^25.0.3",
+    "dotenv": "^17.2.3",
     "typescript": "^5.0.0"
   }
 }

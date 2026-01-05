@@ -1,10 +1,24 @@
+require('dotenv').config();
 const axios = require('axios');
 
 const SLITE_API_BASE = 'https://api.slite.com/v1';
-const API_KEY = '5L173-xi9vACND0mKslF-4e6bda0601db2b23550fe85378b5758ba14f7cb0a4fe5d207d0be9addb22e993';
+const API_KEY = process.env.SLITE_API_KEY;
+
+if (!API_KEY) {
+  console.error('Error: SLITE_API_KEY not found. Please set it in your .env file.');
+  console.error('Copy .env.example to .env and add your API key.');
+  process.exit(1);
+}
 
 async function testSpecificNote() {
-  const noteId = process.argv[2] || 'BoptqNi4pm0lcV'; // First note from search results
+  const noteId = process.argv[2] || process.env.TEST_NOTE_ID;
+
+  if (!noteId) {
+    console.error('Error: No note ID provided.');
+    console.error('Usage: node test-specific-note.js <note-id>');
+    console.error('Or set TEST_NOTE_ID in your .env file.');
+    process.exit(1);
+  }
   
   console.log(`Testing specific note: ${noteId}\n`);
   
