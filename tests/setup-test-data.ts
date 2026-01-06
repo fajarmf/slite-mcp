@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 
 /**
  * Test Data Setup Script (Idempotent)
@@ -16,10 +16,14 @@
  * 3. Skip entirely if test data is already complete
  */
 
-require('dotenv').config();
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+import 'dotenv/config';
+import axios, { AxiosError } from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { SliteNote, SliteChildrenResponse } from '../src/types.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SLITE_API_BASE = 'https://api.slite.com/v1';
 const API_KEY = process.env.SLITE_API_KEY;
@@ -36,8 +40,20 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
+interface SetupOptions {
+  parentNoteId?: string;
+  help?: boolean;
+  force?: boolean;
+}
+
+interface SetupResult {
+  parentNoteId: string;
+  childCount: number;
+  skipped: boolean;
+}
+
 // Generate content for the first child (with searchable keywords)
-function getFirstChildContent() {
+function getFirstChildContent(): string {
   return `# Test Data for MCP Server
 
 This note contains test data for validating the Slite MCP Server functionality.
@@ -72,7 +88,7 @@ The following keywords should be searchable:
 }
 
 // Generate content for pagination test children
-function getPaginationChildContent(index) {
+function getPaginationChildContent(index: number): string {
   return `# Pagination Test Note ${index}
 
 This is child note ${index} for testing cursor-based pagination.
@@ -88,9 +104,9 @@ Created for testing the Slite MCP Server children endpoint pagination.
 }
 
 // Parse command line arguments
-function parseArgs() {
+function parseArgs(): SetupOptions {
   const args = process.argv.slice(2);
-  const options = {};
+  const options: SetupOptions = {};
 
   for (const arg of args) {
     if (arg.startsWith('--parent=')) {
@@ -107,7 +123,7 @@ function parseArgs() {
   return options;
 }
 
-function showHelp() {
+function showHelp(): void {
   console.log(`
 Test Data Setup Script (Idempotent)
 
@@ -128,7 +144,7 @@ After running, add TEST_NOTE_ID to your .env file (if not already set).
 `);
 }
 
-function updateEnvFile(noteId) {
+function updateEnvFile(noteId: string): void {
   const envPath = path.join(__dirname, '..', '.env');
 
   if (!fs.existsSync(envPath)) {
@@ -152,8 +168,8 @@ function updateEnvFile(noteId) {
   fs.writeFileSync(envPath, content);
 }
 
-async function createNote(title, content, parentNoteId = null) {
-  const payload = {
+async function createNote(title: string, content: string, parentNoteId: string | null = null): Promise<SliteNote> {
+  const payload: { title: string; markdown: string; parentNoteId?: string } = {
     title,
     markdown: content
   };
@@ -162,46 +178,46 @@ async function createNote(title, content, parentNoteId = null) {
     payload.parentNoteId = parentNoteId;
   }
 
-  const response = await axios.post(`${SLITE_API_BASE}/notes`, payload, { headers });
+  const response = await axios.post<SliteNote>(`${SLITE_API_BASE}/notes`, payload, { headers });
   return response.data;
 }
 
-async function getNote(noteId) {
-  const response = await axios.get(`${SLITE_API_BASE}/notes/${noteId}`, {
+async function getNote(noteId: string): Promise<SliteNote> {
+  const response = await axios.get<SliteNote>(`${SLITE_API_BASE}/notes/${noteId}`, {
     headers,
     params: { format: 'md' }
   });
   return response.data;
 }
 
-async function getChildren(noteId) {
+async function getChildren(noteId: string): Promise<SliteNote[]> {
   // Fetch all children using cursor pagination
-  let allChildren = [];
-  let cursor = null;
+  let allChildren: SliteNote[] = [];
+  let cursor: string | null = null;
 
   do {
     const params = cursor ? { cursor } : {};
-    const response = await axios.get(`${SLITE_API_BASE}/notes/${noteId}/children`, {
+    const response = await axios.get<SliteChildrenResponse>(`${SLITE_API_BASE}/notes/${noteId}/children`, {
       headers,
       params
     });
 
     allChildren = allChildren.concat(response.data.notes || []);
-    cursor = response.data.hasNextPage ? response.data.nextCursor : null;
+    cursor = response.data.hasNextPage ? response.data.nextCursor ?? null : null;
   } while (cursor);
 
   return allChildren;
 }
 
-async function setupTestData(options = {}) {
+async function setupTestData(options: SetupOptions = {}): Promise<SetupResult> {
   console.log('='.repeat(60));
   console.log('Slite MCP Server - Test Data Setup');
   console.log('='.repeat(60));
   console.log();
 
   // Check if TEST_NOTE_ID is already set in env
-  let parentNoteId = options.parentNoteId || process.env.TEST_NOTE_ID;
-  let parentNote;
+  let parentNoteId: string | undefined = options.parentNoteId || process.env.TEST_NOTE_ID;
+  let parentNote: SliteNote | undefined;
 
   // Step 1: Check existing parent note
   if (parentNoteId) {
@@ -267,11 +283,12 @@ async function setupTestData(options = {}) {
       }
 
     } catch (error) {
-      if (error.response?.status === 404) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      if (axiosError.response?.status === 404) {
         console.log(`  Note not found, will create new parent`);
-        parentNoteId = null;
+        parentNoteId = undefined;
       } else {
-        console.error(`  Error: ${error.response?.data?.message || error.message}`);
+        console.error(`  Error: ${axiosError.response?.data?.message || axiosError.message}`);
         process.exit(1);
       }
     }
@@ -297,7 +314,8 @@ This note and its children are used for automated testing.
       parentNoteId = parentNote.id;
       console.log(`  Created: "${parentNote.title}" (${parentNoteId})`);
     } catch (error) {
-      console.error(`  Error creating parent note: ${error.response?.data?.message || error.message}`);
+      const axiosError = error as AxiosError<{ message?: string }>;
+      console.error(`  Error creating parent note: ${axiosError.response?.data?.message || axiosError.message}`);
       process.exit(1);
     }
   }
@@ -309,7 +327,7 @@ This note and its children are used for automated testing.
   const existingTitles = new Set(existingChildren.map(c => c.title));
   const hasTestDataNote = existingTitles.has('Test Data for MCP Server');
 
-  const childrenToCreate = [];
+  const childrenToCreate: Array<{ title: string; content: string }> = [];
 
   // Add test data note if missing
   if (!hasTestDataNote) {
@@ -349,7 +367,8 @@ This note and its children are used for automated testing.
           console.log(`  [${i + 1}/${childrenToCreate.length}] Created "${title}" (${elapsed}s elapsed)`);
         }
       } catch (error) {
-        console.error(`  Error creating "${title}": ${error.response?.data?.message || error.message}`);
+        const axiosError = error as AxiosError<{ message?: string }>;
+        console.error(`  Error creating "${title}": ${axiosError.response?.data?.message || axiosError.message}`);
         process.exit(1);
       }
     }
@@ -373,7 +392,7 @@ This note and its children are used for automated testing.
   console.log(`Updated .env with TEST_NOTE_ID=${parentNoteId}`);
   console.log();
   console.log(`Total: 1 parent + ${finalChildren.length} children`);
-  console.log(`Parent URL: ${parentNote.url}`);
+  console.log(`Parent URL: ${parentNote?.url}`);
   console.log();
   console.log('Run the test suite with: npm run test:all');
   console.log();

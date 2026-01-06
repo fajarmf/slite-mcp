@@ -17,6 +17,14 @@ import {
   CreateNoteArgsSchema,
   formatZodError,
 } from "./validators.js";
+import {
+  SliteNote,
+  SliteSearchResponse,
+  SliteSearchHit,
+  SliteChildrenResponse,
+  SliteAskResponse,
+  SliteCreateNoteResponse,
+} from "./types.js";
 import { z } from "zod";
 
 const SLITE_API_BASE = "https://api.slite.com/v1";
@@ -292,15 +300,15 @@ class SliteServer {
     });
   }
 
-  private async makeSliteRequest(
+  private async makeSliteRequest<T>(
     endpoint: string,
     options?: {
       method?: "GET" | "PUT" | "POST";
-      params?: any;
-      data?: any;
+      params?: Record<string, unknown>;
+      data?: Record<string, unknown>;
     },
     retries: number = 3
-  ): Promise<any> {
+  ): Promise<T> {
     const { method = "GET", params, data } = options || {};
 
     try {
@@ -326,24 +334,24 @@ class SliteServer {
 
         console.error(`Rate limited. Retrying in ${delay}ms... (${retries} retries left)`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.makeSliteRequest(endpoint, options, retries - 1);
+        return this.makeSliteRequest<T>(endpoint, options, retries - 1);
       }
       throw error;
     }
   }
 
   private async searchNotes(query: string, hitsPerPage: number) {
-    const data = await this.makeSliteRequest("/search-notes", {
+    const data = await this.makeSliteRequest<SliteSearchResponse>("/search-notes", {
       params: { query, hitsPerPage },
     });
 
-    const results = data.hits?.map((hit: any) => ({
+    const results = data.hits?.map((hit: SliteSearchHit) => ({
       id: hit.id,
       title: hit.title,
       content: hit.highlight || "",
       updatedAt: hit.updatedAt,
       type: hit.type,
-      parentNotes: hit.parentNotes?.map((p: any) => p.title).join(" > ") || "",
+      parentNotes: hit.parentNotes?.map((p) => p.title).join(" > ") || "",
     })) || [];
 
     return {
@@ -351,7 +359,7 @@ class SliteServer {
         {
           type: "text",
           text: `Found ${results.length} notes:\n\n${results
-            .map((note: any) => `**${note.title}** (ID: ${note.id})\nPath: ${note.parentNotes}\n${note.content ? `Preview: ${note.content}\n` : ''}Updated: ${new Date(note.updatedAt).toLocaleDateString()}\n---`)
+            .map((note) => `**${note.title}** (ID: ${note.id})\nPath: ${note.parentNotes}\n${note.content ? `Preview: ${note.content}\n` : ''}Updated: ${new Date(note.updatedAt).toLocaleDateString()}\n---`)
             .join("\n")}`,
         },
       ],
@@ -359,7 +367,7 @@ class SliteServer {
   }
 
   private async getNote(noteId: string, format: string) {
-    const data = await this.makeSliteRequest(`/notes/${noteId}`, {
+    const data = await this.makeSliteRequest<SliteNote>(`/notes/${noteId}`, {
       params: { format },
     });
 
@@ -374,11 +382,11 @@ class SliteServer {
   }
 
   private async getNoteChildren(noteId: string, cursor?: string) {
-    const params: any = {};
+    const params: Record<string, unknown> = {};
     if (cursor) {
       params.cursor = cursor;
     }
-    const data = await this.makeSliteRequest(`/notes/${noteId}/children`, { params });
+    const data = await this.makeSliteRequest<SliteChildrenResponse>(`/notes/${noteId}/children`, { params });
 
     const children = data.notes || [];
 
@@ -398,7 +406,7 @@ class SliteServer {
         {
           type: "text",
           text: `Found ${children.length} child notes (Total: ${data.total}):\n\n${children
-            .map((note: any) => `**${note.title}** (ID: ${note.id})\n${note.content?.substring(0, 200) || 'No content preview'}${note.content?.length > 200 ? '...' : ''}\n---`)
+            .map((note) => `**${note.title}** (ID: ${note.id})\n${note.content?.substring(0, 200) || 'No content preview'}${(note.content?.length ?? 0) > 200 ? '...' : ''}\n---`)
             .join("\n")}`,
         },
       ],
@@ -406,16 +414,16 @@ class SliteServer {
   }
 
   private async askSlite(question: string, parentNoteId?: string) {
-    const params: any = { question };
+    const params: Record<string, unknown> = { question };
     if (parentNoteId) {
       params.parentNoteId = parentNoteId;
     }
 
-    const data = await this.makeSliteRequest("/ask", { params });
+    const data = await this.makeSliteRequest<SliteAskResponse>("/ask", { params });
 
     const sources = data.sources || [];
     const sourcesList = sources.length > 0
-      ? `\n\n**Sources:**\n${sources.map((s: any) => `- [${s.title || 'Untitled'}](${s.url})`).join("\n")}`
+      ? `\n\n**Sources:**\n${sources.map((s) => `- [${s.title || 'Untitled'}](${s.url})`).join("\n")}`
       : "";
 
     return {
@@ -434,10 +442,10 @@ class SliteServer {
     dryRun: boolean = false
   ) {
     // 1. Fetch current content
-    const note = await this.makeSliteRequest(`/notes/${noteId}`, {
+    const note = await this.makeSliteRequest<SliteNote>(`/notes/${noteId}`, {
       params: { format: "md" },
     });
-    let content = note.content;
+    let content = note.content || "";
 
     // 2. Apply edits with validation
     const results: string[] = [];
@@ -493,10 +501,10 @@ class SliteServer {
   }
 
   private async updateNote(noteId: string, markdown: string, title?: string) {
-    const data: any = { markdown };
+    const data: Record<string, unknown> = { markdown };
     if (title) data.title = title;
 
-    await this.makeSliteRequest(`/notes/${noteId}`, {
+    await this.makeSliteRequest<SliteNote>(`/notes/${noteId}`, {
       method: "PUT",
       data,
     });
@@ -516,11 +524,11 @@ class SliteServer {
     markdown?: string,
     parentNoteId?: string
   ) {
-    const data: any = { title };
+    const data: Record<string, unknown> = { title };
     if (markdown) data.markdown = markdown;
     if (parentNoteId) data.parentNoteId = parentNoteId;
 
-    const result = await this.makeSliteRequest("/notes", {
+    const result = await this.makeSliteRequest<SliteCreateNoteResponse>("/notes", {
       method: "POST",
       data,
     });
