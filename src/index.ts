@@ -7,6 +7,17 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
+import {
+  SearchArgsSchema,
+  GetNoteArgsSchema,
+  GetNoteChildrenArgsSchema,
+  AskArgsSchema,
+  EditNoteArgsSchema,
+  UpdateNoteArgsSchema,
+  CreateNoteArgsSchema,
+  formatZodError,
+} from "./validators.js";
+import { z } from "zod";
 
 const SLITE_API_BASE = "https://api.slite.com/v1";
 
@@ -19,6 +30,16 @@ class SliteServer {
   private config: SliteConfig;
 
   constructor() {
+    // Validate API key at startup - fail fast if missing
+    const apiKey = process.env.SLITE_API_KEY;
+    if (!apiKey || apiKey.trim() === "") {
+      console.error("Error: SLITE_API_KEY environment variable is required");
+      console.error("Please set your Slite API key in the environment or .env file");
+      process.exit(1);
+    }
+
+    this.config = { apiKey };
+
     this.server = new Server(
       {
         name: "slite-mcp",
@@ -30,10 +51,6 @@ class SliteServer {
         },
       }
     );
-
-    this.config = {
-      apiKey: process.env.SLITE_API_KEY || "",
-    };
 
     this.setupToolHandlers();
   }
@@ -209,51 +226,68 @@ class SliteServer {
 
       try {
         switch (name) {
-          case "slite_search":
-            return await this.searchNotes(args?.query as string, (args?.hitsPerPage as number) || 10);
+          case "slite_search": {
+            const validated = SearchArgsSchema.parse(args);
+            return await this.searchNotes(validated.query, validated.hitsPerPage);
+          }
 
-          case "slite_get_note":
-            return await this.getNote(args?.noteId as string, (args?.format as string) || "md");
+          case "slite_get_note": {
+            const validated = GetNoteArgsSchema.parse(args);
+            return await this.getNote(validated.noteId, validated.format);
+          }
 
-          case "slite_get_note_children":
-            return await this.getNoteChildren(args?.noteId as string, args?.cursor as string | undefined);
+          case "slite_get_note_children": {
+            const validated = GetNoteChildrenArgsSchema.parse(args);
+            return await this.getNoteChildren(validated.noteId, validated.cursor);
+          }
 
-          case "slite_ask":
-            return await this.askSlite(args?.question as string, args?.parentNoteId as string | undefined);
+          case "slite_ask": {
+            const validated = AskArgsSchema.parse(args);
+            return await this.askSlite(validated.question, validated.parentNoteId);
+          }
 
-          case "slite_edit_note":
-            return await this.editNote(
-              args?.noteId as string,
-              args?.edits as Array<{ oldText: string; newText: string }>,
-              (args?.dryRun as boolean) || false
-            );
+          case "slite_edit_note": {
+            const validated = EditNoteArgsSchema.parse(args);
+            return await this.editNote(validated.noteId, validated.edits, validated.dryRun);
+          }
 
-          case "slite_update_note":
-            return await this.updateNote(
-              args?.noteId as string,
-              args?.markdown as string,
-              args?.title as string | undefined
-            );
+          case "slite_update_note": {
+            const validated = UpdateNoteArgsSchema.parse(args);
+            return await this.updateNote(validated.noteId, validated.markdown, validated.title);
+          }
 
-          case "slite_create_note":
-            return await this.createNote(
-              args?.title as string,
-              args?.markdown as string | undefined,
-              args?.parentNoteId as string | undefined
-            );
+          case "slite_create_note": {
+            const validated = CreateNoteArgsSchema.parse(args);
+            return await this.createNote(validated.title, validated.markdown, validated.parentNoteId);
+          }
 
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-        };
+        // Handle Zod validation errors
+        if (error instanceof z.ZodError) {
+          throw new Error(`Invalid arguments: ${formatZodError(error)}`);
+        }
+
+        // Handle Axios errors with proper MCP error format
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+          const apiMessage = error.response?.data?.message || error.message;
+
+          if (status === 401) {
+            throw new Error(`Unauthorized: Invalid or missing Slite API key`);
+          } else if (status === 404) {
+            throw new Error(`Not found: ${apiMessage}`);
+          } else if (status === 429) {
+            throw new Error(`Rate limit exceeded: Please try again later`);
+          } else {
+            throw new Error(`Slite API error (${status}): ${apiMessage}`);
+          }
+        }
+
+        // Re-throw other errors
+        throw error;
       }
     });
   }
@@ -264,20 +298,38 @@ class SliteServer {
       method?: "GET" | "PUT" | "POST";
       params?: any;
       data?: any;
-    }
-  ) {
+    },
+    retries: number = 3
+  ): Promise<any> {
     const { method = "GET", params, data } = options || {};
-    const response = await axios({
-      method,
-      url: `${SLITE_API_BASE}${endpoint}`,
-      headers: {
-        Authorization: `Bearer ${this.config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      params,
-      data,
-    });
-    return response.data;
+
+    try {
+      const response = await axios({
+        method,
+        url: `${SLITE_API_BASE}${endpoint}`,
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        params,
+        data,
+      });
+      return response.data;
+    } catch (error) {
+      // Handle rate limiting with exponential backoff
+      if (axios.isAxiosError(error) && error.response?.status === 429 && retries > 0) {
+        const retryAfter = error.response.headers["retry-after"];
+        // Use Retry-After header if provided, otherwise exponential backoff (1s, 2s, 4s)
+        const delay = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : Math.pow(2, 3 - retries) * 1000;
+
+        console.error(`Rate limited. Retrying in ${delay}ms... (${retries} retries left)`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.makeSliteRequest(endpoint, options, retries - 1);
+      }
+      throw error;
+    }
   }
 
   private async searchNotes(query: string, hitsPerPage: number) {
