@@ -1,6 +1,6 @@
 # Slite MCP Server
 
-A Model Context Protocol (MCP) server that integrates with Slite's API to search and retrieve notes.
+A Model Context Protocol (MCP) server that integrates with Slite's API to search, retrieve, create, and edit notes.
 
 ## Features
 
@@ -8,6 +8,9 @@ A Model Context Protocol (MCP) server that integrates with Slite's API to search
 - 📄 **Get Note Content**: Retrieve specific notes by ID in markdown or HTML format
 - 🌳 **Browse Hierarchy**: Get child notes of any parent note
 - 🤖 **Ask Questions**: Natural language question answering across your workspace
+- ✏️ **Edit Notes**: Search-and-replace editing with validation and dry-run support
+- 📝 **Create Notes**: Create new notes with markdown content
+- 🔄 **Update Notes**: Full content replacement for major rewrites
 
 ## Installation
 
@@ -123,6 +126,71 @@ Ask natural language questions and get AI-powered answers from your Slite worksp
 }
 ```
 
+### slite_create_note
+Create a new note in your Slite workspace.
+
+**Parameters:**
+- `title` (required): Note title
+- `markdown` (optional): Note content in markdown format
+- `parentNoteId` (optional): Parent note ID (creates in personal channel if not specified)
+
+**Example:**
+```json
+{
+  "tool": "slite_create_note",
+  "arguments": {
+    "title": "Meeting Notes",
+    "markdown": "# Meeting Notes\n\n- Discussed project timeline\n- Assigned tasks",
+    "parentNoteId": "5i6k33yrVu7eMy"
+  }
+}
+```
+
+### slite_edit_note
+Edit a note using search-and-replace. Preferred for targeted edits - faster and safer than full rewrite.
+
+**Parameters:**
+- `noteId` (required): The ID of the note to edit
+- `edits` (required): Array of search-and-replace operations
+  - `oldText`: Exact text to find (must be unique in document)
+  - `newText`: Text to replace it with
+- `dryRun` (optional): If true, validate edits without applying them
+
+**Example:**
+```json
+{
+  "tool": "slite_edit_note",
+  "arguments": {
+    "noteId": "BoptqNi4pm0lcV",
+    "edits": [
+      { "oldText": "Draft", "newText": "Final" },
+      { "oldText": "TODO: add details", "newText": "Implementation complete" }
+    ],
+    "dryRun": false
+  }
+}
+```
+
+### slite_update_note
+Replace entire note content. Use `slite_edit_note` for small changes.
+
+**Parameters:**
+- `noteId` (required): The ID of the note to update
+- `markdown` (required): New markdown content (replaces entire note)
+- `title` (optional): New title (keeps existing if not provided)
+
+**Example:**
+```json
+{
+  "tool": "slite_update_note",
+  "arguments": {
+    "noteId": "BoptqNi4pm0lcV",
+    "markdown": "# New Content\n\nThis replaces everything.",
+    "title": "Updated Title"
+  }
+}
+```
+
 ## Testing
 
 ### Quick Start
@@ -166,6 +234,7 @@ The test suite includes:
 - **Pagination**: hitsPerPage for search, cursor for children (requires 55+ children)
 - **Content Formats**: Markdown and HTML output
 - **MCP Server Integration**: All tools via stdio transport
+- **Write Operations**: Create, edit, update - with content verification after each operation
 
 ## Development
 
@@ -174,7 +243,7 @@ The test suite includes:
 ```
 slite-mcp/
 ├── src/
-│   └── index.ts           # Main MCP server implementation
+│   └── index.ts           # Main MCP server (7 tools: 4 read, 3 write)
 ├── build/                 # Compiled JavaScript files
 ├── tests/
 │   ├── index.test.js      # Consolidated test suite
