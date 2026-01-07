@@ -8,12 +8,18 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { TEST_NOTE_ID, createMcpServer } from './test-helpers.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-interface McpToolResult {
-  result?: {
-    content?: Array<{ text: string }>;
-  };
+/** JSON-RPC response wrapper for MCP results */
+interface JsonRpcResponse<T> {
+  result?: T;
   error?: unknown;
+}
+
+/** Helper to extract text from CallToolResult content */
+function getTextContent(result: CallToolResult | undefined): string {
+  const content = result?.content?.[0];
+  return content?.type === 'text' ? content.text : '';
 }
 
 describe('Write Operations', () => {
@@ -52,9 +58,9 @@ describe('Write Operations', () => {
         markdown: expectedContent,
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     assert.ok(createResult.includes('Created note'), 'should confirm note creation');
 
     // Extract note ID from response
@@ -66,9 +72,9 @@ describe('Write Operations', () => {
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: createdNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes(expectedTitle), 'fetched note should have correct title');
     assert.ok(noteContent.includes(ORIGINAL_MARKER), 'fetched note should contain the original marker');
   });
@@ -93,18 +99,18 @@ describe('Write Operations', () => {
         ],
         dryRun: true
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const dryRunResult = dryRunResponse.result?.content?.[0]?.text || '';
+    const dryRunResult = getTextContent(dryRunResponse.result);
     assert.ok(dryRunResult.includes('Dry run successful'), 'should confirm dry run');
 
     // Verify content was NOT changed
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: createdNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes(ORIGINAL_MARKER), 'content should still have ORIGINAL marker after dry run');
     assert.ok(!noteContent.includes(EDITED_MARKER), 'content should NOT have EDITED marker after dry run');
   });
@@ -124,18 +130,18 @@ describe('Write Operations', () => {
           { oldText: ORIGINAL_MARKER, newText: EDITED_MARKER }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Successfully applied'), 'should confirm edit');
 
     // Verify content WAS changed
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: createdNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes(EDITED_MARKER), 'content should have EDITED marker after edit');
     assert.ok(!noteContent.includes(ORIGINAL_MARKER), 'content should NOT have ORIGINAL marker after edit');
   });
@@ -154,9 +160,9 @@ describe('Write Operations', () => {
           { oldText: 'THIS_TEXT_DOES_NOT_EXIST_IN_NOTE', newText: 'replacement' }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
+    const content = getTextContent(response.result);
     assert.ok(content.includes('text not found'), 'should report text not found');
   });
 
@@ -181,18 +187,18 @@ describe('Write Operations', () => {
         markdown: newContent,
         title: newTitle
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const updateResult = updateResponse.result?.content?.[0]?.text || '';
+    const updateResult = getTextContent(updateResponse.result);
     assert.ok(updateResult.includes('Successfully updated'), 'should confirm update');
 
     // Verify content was completely replaced
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: createdNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes(newTitle), 'should have new title');
     assert.ok(noteContent.includes('UPDATE_COMPLETE_789'), 'should have new content marker');
     assert.ok(!noteContent.includes(EDITED_MARKER), 'should NOT have old edited marker');
@@ -230,9 +236,9 @@ describe('Edit Edge Cases', () => {
         markdown: `# Special Characters\n\n${specialContent}`,
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
     assert.ok(idMatch, 'should create note');
     const edgeCaseNoteId = idMatch[1];
@@ -246,18 +252,18 @@ describe('Edit Edge Cases', () => {
           { oldText: '$100.00 (20% off)', newText: '$80.00 (36% off)' }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Successfully applied'), 'should edit text with special chars');
 
     // Verify the change
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: edgeCaseNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes('$80.00 (36% off)'), 'should contain new text');
     assert.ok(!noteContent.includes('$100.00 (20% off)'), 'should not contain old text');
   });
@@ -277,9 +283,9 @@ describe('Edit Edge Cases', () => {
         markdown: `# Unicode Test\n\n${unicodeContent}`,
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
     assert.ok(idMatch, 'should create note');
     const unicodeNoteId = idMatch[1];
@@ -293,18 +299,18 @@ describe('Edit Edge Cases', () => {
           { oldText: 'Hello 世界! 🎉', newText: 'Goodbye 世界! 🎊✨' }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Successfully applied'), 'should edit unicode/emoji text');
 
     // Verify the change
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: unicodeNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes('Goodbye 世界! 🎊✨'), 'should contain new unicode text');
     assert.ok(!noteContent.includes('Hello 世界! 🎉'), 'should not contain old unicode text');
   });
@@ -323,9 +329,9 @@ describe('Edit Edge Cases', () => {
         markdown: '# Whitespace Test\n\nWHITESPACE_START text here WHITESPACE_END\n\nAnother paragraph',
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
     assert.ok(idMatch, 'should create note');
     const whitespaceNoteId = idMatch[1];
@@ -339,18 +345,18 @@ describe('Edit Edge Cases', () => {
           { oldText: 'WHITESPACE_START text here WHITESPACE_END', newText: 'REPLACED_CONTENT' }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Successfully applied'), 'should edit text');
 
     // Verify the change
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: whitespaceNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes('REPLACED_CONTENT'), 'should contain new text');
     assert.ok(!noteContent.includes('WHITESPACE_START'), 'should not contain old text');
   });
@@ -370,9 +376,9 @@ describe('Edit Edge Cases', () => {
         markdown: `# Atomicity Test\n\n${atomicContent}`,
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
     assert.ok(idMatch, 'should create note');
     const atomicNoteId = idMatch[1];
@@ -388,9 +394,9 @@ describe('Edit Edge Cases', () => {
           { oldText: 'ATOMIC_MARKER_2', newText: 'CHANGED_2' }   // Never reached
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Edit #2 failed') || editResult.includes('text not found'),
       'should report failure on edit #2');
 
@@ -398,9 +404,9 @@ describe('Edit Edge Cases', () => {
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: atomicNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     // Note: The current implementation applies edits sequentially, so ATOMIC_MARKER_1
     // will be changed to CHANGED_1 before the failure. This tests the ACTUAL behavior.
     // If atomicity is desired, this test documents that it's NOT currently atomic.
@@ -425,9 +431,9 @@ describe('Edit Edge Cases', () => {
         markdown: `# Batch Test\n\n${batchContent}`,
         parentNoteId: TEST_NOTE_ID
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const createResult = createResponse.result?.content?.[0]?.text || '';
+    const createResult = getTextContent(createResponse.result);
     const idMatch = createResult.match(/ID: ([a-zA-Z0-9_-]+)/);
     assert.ok(idMatch, 'should create note');
     const batchNoteId = idMatch[1];
@@ -443,18 +449,18 @@ describe('Edit Edge Cases', () => {
           { oldText: 'BATCH_C', newText: 'THIRD' }
         ]
       }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const editResult = editResponse.result?.content?.[0]?.text || '';
+    const editResult = getTextContent(editResponse.result);
     assert.ok(editResult.includes('Successfully applied 3 edit'), 'should confirm all 3 edits');
 
     // Verify all changes were applied
     const getResponse = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: batchNoteId, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const noteContent = getResponse.result?.content?.[0]?.text || '';
+    const noteContent = getTextContent(getResponse.result);
     assert.ok(noteContent.includes('FIRST is here'), 'should have first replacement');
     assert.ok(noteContent.includes('SECOND is there'), 'should have second replacement');
     assert.ok(noteContent.includes('THIRD is everywhere'), 'should have third replacement');

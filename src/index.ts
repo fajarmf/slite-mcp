@@ -25,6 +25,7 @@ import {
   SliteAskResponse,
   SliteCreateNoteResponse,
 } from "./types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 const SLITE_API_BASE = "https://api.slite.com/v1";
@@ -340,7 +341,7 @@ class SliteServer {
     }
   }
 
-  private async searchNotes(query: string, hitsPerPage: number) {
+  private async searchNotes(query: string, hitsPerPage: number): Promise<CallToolResult> {
     const data = await this.makeSliteRequest<SliteSearchResponse>("/search-notes", {
       params: { query, hitsPerPage },
     });
@@ -357,7 +358,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Found ${results.length} notes:\n\n${results
             .map((note) => `**${note.title}** (ID: ${note.id})\nPath: ${note.parentNotes}\n${note.content ? `Preview: ${note.content}\n` : ''}Updated: ${new Date(note.updatedAt).toLocaleDateString()}\n---`)
             .join("\n")}`,
@@ -366,7 +367,7 @@ class SliteServer {
     };
   }
 
-  private async getNote(noteId: string, format: string) {
+  private async getNote(noteId: string, format: string): Promise<CallToolResult> {
     const data = await this.makeSliteRequest<SliteNote>(`/notes/${noteId}`, {
       params: { format },
     });
@@ -374,14 +375,14 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `**${data.title}**\n\n${data.content}`,
         },
       ],
     };
   }
 
-  private async getNoteChildren(noteId: string, cursor?: string) {
+  private async getNoteChildren(noteId: string, cursor?: string): Promise<CallToolResult> {
     const params: Record<string, unknown> = {};
     if (cursor) {
       params.cursor = cursor;
@@ -394,7 +395,7 @@ class SliteServer {
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: "No child notes found.",
           },
         ],
@@ -404,7 +405,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Found ${children.length} child notes (Total: ${data.total}):\n\n${children
             .map((note) => `**${note.title}** (ID: ${note.id})\n${note.content?.substring(0, 200) || 'No content preview'}${(note.content?.length ?? 0) > 200 ? '...' : ''}\n---`)
             .join("\n")}`,
@@ -413,7 +414,7 @@ class SliteServer {
     };
   }
 
-  private async askSlite(question: string, parentNoteId?: string) {
+  private async askSlite(question: string, parentNoteId?: string): Promise<CallToolResult> {
     const params: Record<string, unknown> = { question };
     if (parentNoteId) {
       params.parentNoteId = parentNoteId;
@@ -429,7 +430,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `${data.answer || "No answer available."}${sourcesList}`,
         },
       ],
@@ -440,7 +441,7 @@ class SliteServer {
     noteId: string,
     edits: Array<{ oldText: string; newText: string }>,
     dryRun: boolean = false
-  ) {
+  ): Promise<CallToolResult> {
     // 1. Fetch current content
     const note = await this.makeSliteRequest<SliteNote>(`/notes/${noteId}`, {
       params: { format: "md" },
@@ -457,7 +458,7 @@ class SliteServer {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `Error: Edit #${i + 1} failed - text not found: "${oldText.substring(0, 50)}${oldText.length > 50 ? "..." : ""}"`,
             },
           ],
@@ -467,7 +468,7 @@ class SliteServer {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `Error: Edit #${i + 1} failed - text found ${occurrences} times. Provide more context to make it unique.`,
             },
           ],
@@ -491,7 +492,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: dryRun
             ? `Dry run successful - ${edits.length} edit(s) would be applied:\n${results.join("\n")}`
             : `Successfully applied ${edits.length} edit(s) to note ${noteId}:\n${results.join("\n")}`,
@@ -500,7 +501,7 @@ class SliteServer {
     };
   }
 
-  private async updateNote(noteId: string, markdown: string, title?: string) {
+  private async updateNote(noteId: string, markdown: string, title?: string): Promise<CallToolResult> {
     const data: Record<string, unknown> = { markdown };
     if (title) data.title = title;
 
@@ -512,7 +513,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Successfully updated note ${noteId}${title ? ` with new title "${title}"` : ""}`,
         },
       ],
@@ -523,7 +524,7 @@ class SliteServer {
     title: string,
     markdown?: string,
     parentNoteId?: string
-  ) {
+  ): Promise<CallToolResult> {
     const data: Record<string, unknown> = { title };
     if (markdown) data.markdown = markdown;
     if (parentNoteId) data.parentNoteId = parentNoteId;
@@ -536,7 +537,7 @@ class SliteServer {
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Created note "${result.title}" (ID: ${result.id})`,
         },
       ],

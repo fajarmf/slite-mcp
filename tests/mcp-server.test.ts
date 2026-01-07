@@ -8,12 +8,11 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { TEST_NOTE_ID, createMcpServer } from './test-helpers.js';
+import type { CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 
-interface McpToolResult {
-  result?: {
-    tools?: Array<{ name: string }>;
-    content?: Array<{ text: string }>;
-  };
+/** JSON-RPC response wrapper for MCP results */
+interface JsonRpcResponse<T> {
+  result?: T;
   error?: unknown;
 }
 
@@ -33,7 +32,7 @@ describe('MCP Server', () => {
   // ===========================================================================
 
   it('should list all tools', async () => {
-    const response = await server.sendRequest('tools/list') as McpToolResult;
+    const response = await server.sendRequest('tools/list') as JsonRpcResponse<ListToolsResult>;
     const tools = response.result?.tools || [];
     const toolNames = tools.map(t => t.name);
 
@@ -57,10 +56,11 @@ describe('MCP Server', () => {
     const response = await server.sendRequest('tools/call', {
       name: 'slite_search',
       arguments: { query: 'test', hitsPerPage: 5 }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
-    assert.ok(content.includes('Found'), 'should return formatted results');
+    const content = response.result?.content?.[0];
+    const text = content?.type === 'text' ? content.text : '';
+    assert.ok(text.includes('Found'), 'should return formatted results');
   });
 
   it('should execute slite_get_note tool', async () => {
@@ -72,10 +72,11 @@ describe('MCP Server', () => {
     const response = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: TEST_NOTE_ID, format: 'md' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
-    assert.ok(content.length > 0, 'should return note content');
+    const content = response.result?.content?.[0];
+    const text = content?.type === 'text' ? content.text : '';
+    assert.ok(text.length > 0, 'should return note content');
   });
 
   it('should execute slite_get_note_children tool', async () => {
@@ -87,20 +88,22 @@ describe('MCP Server', () => {
     const response = await server.sendRequest('tools/call', {
       name: 'slite_get_note_children',
       arguments: { noteId: TEST_NOTE_ID }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
-    assert.ok(content.includes('child notes'), 'should return children info');
+    const content = response.result?.content?.[0];
+    const text = content?.type === 'text' ? content.text : '';
+    assert.ok(text.includes('child notes'), 'should return children info');
   });
 
   it('should execute slite_ask tool', async () => {
     const response = await server.sendRequest('tools/call', {
       name: 'slite_ask',
       arguments: { question: 'What is this about?' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
-    assert.ok(content.length > 0 || content === '', 'should return answer or empty');
+    const content = response.result?.content?.[0];
+    const text = content?.type === 'text' ? content.text : '';
+    assert.ok(text.length > 0 || text === '', 'should return answer or empty');
   });
 
   // ===========================================================================
@@ -111,9 +114,10 @@ describe('MCP Server', () => {
     const response = await server.sendRequest('tools/call', {
       name: 'slite_get_note',
       arguments: { noteId: 'invalid-note-id-xyz' }
-    }) as McpToolResult;
+    }) as JsonRpcResponse<CallToolResult>;
 
-    const content = response.result?.content?.[0]?.text || '';
-    assert.ok(content.includes('Error') || response.error, 'should return error');
+    const content = response.result?.content?.[0];
+    const text = content?.type === 'text' ? content.text : '';
+    assert.ok(text.includes('Error') || response.error, 'should return error');
   });
 });
