@@ -25,7 +25,7 @@ import {
   SliteAskResponse,
   SliteCreateNoteResponse,
 } from "./types.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 const SLITE_API_BASE = "https://api.slite.com/v1";
@@ -65,11 +65,10 @@ class SliteServer {
   }
 
   private setupToolHandlers() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: [
-          {
-            name: "slite_search",
+    this.server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
+      const tools: Tool[] = [
+        {
+          name: "slite_search",
             description: "Search for notes in Slite",
             inputSchema: {
               type: "object",
@@ -225,12 +224,12 @@ class SliteServer {
               },
               required: ["title"],
             },
-          },
-        ],
-      };
+        },
+      ];
+      return { tools };
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
       const { name, arguments: args } = request.params;
 
       try {
