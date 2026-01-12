@@ -93,6 +93,50 @@ class SliteServer {
               required: ["noteId"],
             },
           },
+          {
+            name: "slite_create_note",
+            description: "Create a new note in Slite",
+            inputSchema: {
+              type: "object",
+              properties: {
+                title: {
+                  type: "string",
+                  description: "The title of the note",
+                },
+                markdown: {
+                  type: "string",
+                  description: "The markdown content of the note (optional)",
+                },
+                parentNoteId: {
+                  type: "string",
+                  description: "The ID of the parent note (optional, defaults to personal channel)",
+                },
+              },
+              required: ["title"],
+            },
+          },
+          {
+            name: "slite_update_note",
+            description: "Update an existing note in Slite",
+            inputSchema: {
+              type: "object",
+              properties: {
+                noteId: {
+                  type: "string",
+                  description: "The ID of the note to update",
+                },
+                title: {
+                  type: "string",
+                  description: "The new title of the note (optional)",
+                },
+                markdown: {
+                  type: "string",
+                  description: "The new markdown content of the note (optional)",
+                },
+              },
+              required: ["noteId"],
+            },
+          },
         ],
       };
     });
@@ -110,7 +154,21 @@ class SliteServer {
           
           case "slite_get_note_children":
             return await this.getNoteChildren(args?.noteId as string, (args?.limit as number) || 20);
-          
+
+          case "slite_create_note":
+            return await this.createNote(
+              args?.title as string,
+              args?.markdown as string,
+              args?.parentNoteId as string
+            );
+
+          case "slite_update_note":
+            return await this.updateNote(
+              args?.noteId as string,
+              args?.title as string,
+              args?.markdown as string
+            );
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -127,14 +185,25 @@ class SliteServer {
     });
   }
 
-  private async makeSliteRequest(endpoint: string, params?: any) {
-    const response = await axios.get(`${SLITE_API_BASE}${endpoint}`, {
+  private async makeSliteRequest(endpoint: string, params?: any, method: string = "GET", data?: any) {
+    const config: any = {
+      method,
+      url: `${SLITE_API_BASE}${endpoint}`,
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
       },
-      params,
-    });
+    };
+
+    if (method === "GET" && params) {
+      config.params = params;
+    }
+
+    if ((method === "POST" || method === "PUT") && data) {
+      config.data = data;
+    }
+
+    const response = await axios(config);
     return response.data;
   }
 
@@ -186,7 +255,7 @@ class SliteServer {
     });
 
     const children = data.notes || [];
-    
+
     if (children.length === 0) {
       return {
         content: [
@@ -205,6 +274,56 @@ class SliteServer {
           text: `Found ${children.length} child notes (Total: ${data.total}):\n\n${children
             .map((note: any) => `**${note.title}** (ID: ${note.id})\n${note.content?.substring(0, 200) || 'No content preview'}${note.content?.length > 200 ? '...' : ''}\n---`)
             .join("\n")}`,
+        },
+      ],
+    };
+  }
+
+  private async createNote(title: string, markdown?: string, parentNoteId?: string) {
+    const requestBody: any = { title };
+
+    if (markdown) {
+      requestBody.markdown = markdown;
+    }
+
+    if (parentNoteId) {
+      requestBody.parentNoteId = parentNoteId;
+    }
+
+    const data = await this.makeSliteRequest("/notes", undefined, "POST", requestBody);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Note created successfully!\n\n**Title:** ${data.title}\n**ID:** ${data.id}\n**URL:** ${data.url || 'N/A'}`,
+        },
+      ],
+    };
+  }
+
+  private async updateNote(noteId: string, title?: string, markdown?: string) {
+    const requestBody: any = {};
+
+    if (title) {
+      requestBody.title = title;
+    }
+
+    if (markdown) {
+      requestBody.markdown = markdown;
+    }
+
+    if (Object.keys(requestBody).length === 0) {
+      throw new Error("At least one of title or markdown must be provided for update");
+    }
+
+    const data = await this.makeSliteRequest(`/notes/${noteId}`, undefined, "PUT", requestBody);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Note updated successfully!\n\n**Title:** ${data.title}\n**ID:** ${data.id}\n**Updated At:** ${new Date(data.updatedAt).toLocaleString()}`,
         },
       ],
     };
