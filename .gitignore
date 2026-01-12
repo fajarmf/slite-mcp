@@ -13,6 +13,7 @@ dist/
 # IDE files
 .vscode/
 .idea/
+CLAUDE.md
 *.swp
 *.swo
 *~

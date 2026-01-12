@@ -1,12 +1,16 @@
 # Slite MCP Server
 
-A Model Context Protocol (MCP) server that integrates with Slite's API to search and retrieve notes.
+A Model Context Protocol (MCP) server that integrates with Slite's API to search, retrieve, create, and edit notes.
 
 ## Features
 
 - 🔍 **Search Notes**: Search through your Slite workspace
 - 📄 **Get Note Content**: Retrieve specific notes by ID in markdown or HTML format
 - 🌳 **Browse Hierarchy**: Get child notes of any parent note
+- 🤖 **Ask Questions**: Natural language question answering across your workspace
+- ✏️ **Edit Notes**: Search-and-replace editing with validation and dry-run support
+- 📝 **Create Notes**: Create new notes with markdown content
+- 🔄 **Update Notes**: Full content replacement for major rewrites
 
 ## Installation
 
@@ -57,7 +61,7 @@ Search for notes in your Slite workspace.
 
 **Parameters:**
 - `query` (required): Search query string
-- `limit` (optional): Maximum number of results (default: 10)
+- `hitsPerPage` (optional): Results per page (default: 10)
 
 **Example:**
 ```json
@@ -65,7 +69,7 @@ Search for notes in your Slite workspace.
   "tool": "slite_search",
   "arguments": {
     "query": "project documentation",
-    "limit": 5
+    "hitsPerPage": 5
   }
 }
 ```
@@ -93,33 +97,144 @@ Get all child notes of a parent note.
 
 **Parameters:**
 - `noteId` (required): The ID of the parent note
-- `limit` (optional): Maximum number of results (default: 20)
+- `cursor` (optional): Pagination cursor for next page
 
 **Example:**
 ```json
 {
   "tool": "slite_get_note_children",
   "arguments": {
-    "noteId": "5i6k33yrVu7eMy",
-    "limit": 10
+    "noteId": "5i6k33yrVu7eMy"
+  }
+}
+```
+
+### slite_ask
+Ask natural language questions and get AI-powered answers from your Slite workspace.
+
+**Parameters:**
+- `question` (required): The question to ask
+- `parentNoteId` (optional): Limit search to notes under this parent
+
+**Example:**
+```json
+{
+  "tool": "slite_ask",
+  "arguments": {
+    "question": "What is our deployment process?"
+  }
+}
+```
+
+### slite_create_note
+Create a new note in your Slite workspace.
+
+**Parameters:**
+- `title` (required): Note title
+- `markdown` (optional): Note content in markdown format
+- `parentNoteId` (optional): Parent note ID (creates in personal channel if not specified)
+
+**Example:**
+```json
+{
+  "tool": "slite_create_note",
+  "arguments": {
+    "title": "Meeting Notes",
+    "markdown": "# Meeting Notes\n\n- Discussed project timeline\n- Assigned tasks",
+    "parentNoteId": "5i6k33yrVu7eMy"
+  }
+}
+```
+
+### slite_edit_note
+Edit a note using search-and-replace. Preferred for targeted edits - faster and safer than full rewrite.
+
+**Parameters:**
+- `noteId` (required): The ID of the note to edit
+- `edits` (required): Array of search-and-replace operations
+  - `oldText`: Exact text to find (must be unique in document)
+  - `newText`: Text to replace it with
+- `dryRun` (optional): If true, validate edits without applying them
+
+**Example:**
+```json
+{
+  "tool": "slite_edit_note",
+  "arguments": {
+    "noteId": "BoptqNi4pm0lcV",
+    "edits": [
+      { "oldText": "Draft", "newText": "Final" },
+      { "oldText": "TODO: add details", "newText": "Implementation complete" }
+    ],
+    "dryRun": false
+  }
+}
+```
+
+### slite_update_note
+Replace entire note content. Use `slite_edit_note` for small changes.
+
+**Parameters:**
+- `noteId` (required): The ID of the note to update
+- `markdown` (required): New markdown content (replaces entire note)
+- `title` (optional): New title (keeps existing if not provided)
+
+**Example:**
+```json
+{
+  "tool": "slite_update_note",
+  "arguments": {
+    "noteId": "BoptqNi4pm0lcV",
+    "markdown": "# New Content\n\nThis replaces everything.",
+    "title": "Updated Title"
   }
 }
 ```
 
 ## Testing
 
-Run the test scripts to verify your API connection:
+### Quick Start
 
 ```bash
-# Test API connection with default search
-node tests/test-slite-api.js
+# Copy environment config and add your API key
+cp .env.example .env
+# Edit .env with your SLITE_API_KEY
 
-# Test with custom search query
-node tests/test-slite-api.js "your search term"
+# Setup test data (creates test documents in Slite)
+npm run test:setup
 
-# Test specific note retrieval
-node tests/test-specific-note.js [noteId]
+# Run all tests
+npm test
 ```
+
+### Test Setup
+
+The `test:setup` command creates test documents in your Slite workspace:
+- A parent note with 55 child notes (for cursor pagination testing)
+- A "Test Data for MCP Server" child with searchable keywords
+
+The script is idempotent - it won't create duplicates if test data already exists.
+
+```bash
+# Setup with a new parent note
+npm run test:setup
+
+# Or use an existing note as parent
+npm run test:setup -- --parent=<note-id>
+
+# Force recreation even if data exists
+npm run test:setup -- --force
+```
+
+### Test Suite
+
+The test suite includes:
+- **API Tests**: Search, get note, get children, ask endpoint
+- **Error Handling**: Invalid IDs, unauthorized access
+- **Pagination**: hitsPerPage for search, cursor for children (requires 55+ children)
+- **Content Formats**: Markdown and HTML output
+- **MCP Server Integration**: All tools via stdio transport
+- **Write Operations**: Create, edit, update - with content verification after each operation
 
 ## Development
 
@@ -128,10 +243,12 @@ node tests/test-specific-note.js [noteId]
 ```
 slite-mcp/
 ├── src/
-│   └── index.ts        # Main MCP server implementation
-├── build/              # Compiled JavaScript files
-├── tests/              # Test scripts
-├── examples/           # Example configurations
+│   └── index.ts           # Main MCP server (7 tools: 4 read, 3 write)
+├── build/                 # Compiled JavaScript files
+├── tests/
+│   ├── index.test.js      # Consolidated test suite
+│   └── setup-test-data.js # Idempotent test data setup
+├── examples/              # Example configurations
 ├── package.json
 ├── tsconfig.json
 └── README.md
