@@ -22,14 +22,31 @@ export const headers = {
 };
 
 /**
- * Make a direct request to the Slite API
+ * Make a direct request to the Slite API with retry logic for rate limits
  */
 export async function sliteRequest<T = unknown>(
   endpoint: string,
-  params: Record<string, unknown> = {}
+  params: Record<string, unknown> = {},
+  retries: number = 5
 ): Promise<T> {
-  const response = await axios.get<T>(`${SLITE_API_BASE}${endpoint}`, { headers, params });
-  return response.data;
+  try {
+    const response = await axios.get<T>(`${SLITE_API_BASE}${endpoint}`, { headers, params });
+    return response.data;
+  } catch (error) {
+    // Retry on rate limiting (429)
+    if (axios.isAxiosError(error) && error.response?.status === 429 && retries > 0) {
+      const retryAfter = error.response?.headers['retry-after'];
+      // Use Retry-After header if provided, otherwise exponential backoff (2s, 4s, 8s, 16s, 32s)
+      const delay = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : Math.pow(2, 6 - retries) * 1000;
+
+      console.log(`Rate limited. Retrying in ${delay}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return sliteRequest<T>(endpoint, params, retries - 1);
+    }
+    throw error;
+  }
 }
 
 interface McpMessage {
