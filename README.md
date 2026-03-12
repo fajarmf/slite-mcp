@@ -1,4 +1,33 @@
-# Slite MCP Server
+# ⚠️ DEPRECATED — Use the Official Slite MCP Instead
+
+> **This project is no longer maintained.**
+>
+> Slite now provides an [official MCP server](https://slite.com) with native support for all block types including mermaid diagrams, tables, callouts, and more.
+>
+> **To migrate, update your MCP config:**
+> ```json
+> {
+>   "mcpServers": {
+>     "slite-official": {
+>       "type": "http",
+>       "url": "https://api.slite.com/mcp",
+>       "headers": {
+>         "Authorization": "Bearer YOUR_SLITE_API_KEY"
+>       }
+>     }
+>   }
+> }
+> ```
+>
+> Key improvements in the official MCP over this repo:
+> - ✅ Mermaid/diagram blocks work correctly
+> - ✅ Block-level editing via `modify-block` (no more full-document rewrites)
+> - ✅ Callouts, tables, collapsibles, and all native Slite blocks
+> - ✅ Maintained by Slite directly
+
+---
+
+# Slite MCP Server (Deprecated)
 
 A Model Context Protocol (MCP) server that integrates with Slite's API to search, retrieve, create, and edit notes.
 
